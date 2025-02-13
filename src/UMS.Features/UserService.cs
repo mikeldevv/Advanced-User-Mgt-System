@@ -34,7 +34,7 @@ public class UserService : IUserService
 
     public Task<User?> GetUserByEmailAddress(string emailAddress)
     {
-        return _dbContext.Users.SingleOrDefaultAsync(x => x.EmailAddress == emailAddress);
+        return _dbContext.Users.FirstOrDefaultAsync(x => x.EmailAddress == emailAddress);
     }
 
     public Task<User?> GetUserById(long userId)

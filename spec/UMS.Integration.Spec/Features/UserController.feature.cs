@@ -172,8 +172,8 @@ namespace UMS.Integration.Spec.Features
         testRunner.Then("the response status code should be 400 BadRequest", ((string)(null)), ((TechTalk.SpecFlow.Table)(null)), "Then ");
 #line hidden
 #line 16
-        testRunner.And("the response should contain \"User with Email mikemill@example.com already exists\"" +
-                        "", ((string)(null)), ((TechTalk.SpecFlow.Table)(null)), "And ");
+        testRunner.And("the response should contain \"User with Email \'mikemill@example.com\' already exist" +
+                        "s\"", ((string)(null)), ((TechTalk.SpecFlow.Table)(null)), "And ");
 #line hidden
             }
             this.ScenarioCleanup();

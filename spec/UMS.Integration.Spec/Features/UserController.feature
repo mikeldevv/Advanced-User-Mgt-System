@@ -13,7 +13,7 @@ I want to register new users and perform other account management operations
     Scenario: Register user with existing email
         When a user registers with existing email
         Then the response status code should be 400 BadRequest
-        And the response should contain "User with Email mikemill@example.com already exists"
+        And the response should contain "User with Email 'mikemill@example.com' already exists"
 
     Scenario: Register user with invalid OTP
         When a user registers with invalid OTP
