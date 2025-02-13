@@ -1,0 +1,192 @@
+using FakeItEasy;
+using StackExchange.Redis;
+using UMS.Features;
+using Xunit;
+
+namespace UMS.Integration.Unit_Tests;
+
+public class RedisCacheTests
+{
+   [Fact]
+    public async Task Exists_ShouldReturnTrueAndTimeSpan_WhenKeyExists()
+    {
+        // Arrange
+        var key = "testKey";
+        var ttl = TimeSpan.FromMinutes(5);
+        
+        var redisConnectionMock =  A.Fake<IConnectionMultiplexer>();
+        var databaseMock = A.Fake<IDatabase>();
+        
+        A.CallTo(() => redisConnectionMock.GetDatabase(A<int>._, A<object>._))
+            .Returns(databaseMock);
+        
+        A.CallTo(() => databaseMock.KeyTimeToLiveAsync(key, CommandFlags.None))
+            .Returns(ttl);
+        
+        var redisCache = new RedisCache(redisConnectionMock);
+
+        
+        // Act
+        var result = await redisCache.Exists(key);
+
+        // Assert
+        Assert.True(result.Hit);
+        Assert.Equal(ttl, result.ExpiresIn);
+    }
+
+    [Fact]
+    public async Task Exists_ShouldReturnFalseAndNull_WhenKeyDoesNotExist()
+    {
+        // Arrange
+        var key = "nonExistentKey";
+        
+        var redisConnectionMock = A.Fake<IConnectionMultiplexer>();
+        var databaseMock = A.Fake<IDatabase>();
+        
+        A.CallTo(() => redisConnectionMock.GetDatabase(A<int>._, A<object>._))
+            .Returns(databaseMock);
+        
+        A.CallTo(() => databaseMock.KeyTimeToLiveAsync(key, CommandFlags.None))
+            .Returns((TimeSpan?)null);
+        
+        var redisCache = new RedisCache(redisConnectionMock);
+
+        
+        // Act
+        var result = await redisCache.Exists(key);
+
+        // Assert
+        Assert.False(result.Hit);
+        Assert.Null(result.ExpiresIn);
+    }
+    
+    [Fact]
+    public async Task Read_ShouldReturnValidValueAndTTL_WhenKeyExists()
+    {
+        // Arrange
+        var key = "testKey";
+        var value = "testValue";
+        var ttl = TimeSpan.FromMinutes(5);
+
+        var redisConnectionMock = A.Fake<IConnectionMultiplexer>();
+        var databaseMock = A.Fake<IDatabase>();
+
+        A.CallTo(() => databaseMock.StringGetAsync(key, CommandFlags.None))
+            .Returns(value);
+        A.CallTo(() => databaseMock.KeyTimeToLiveAsync(key, CommandFlags.None))
+            .Returns(ttl);
+
+        A.CallTo(() => redisConnectionMock.GetDatabase(A<int>._, A<object>._))
+            .Returns(databaseMock);
+
+        var redisCache = new RedisCache(redisConnectionMock);
+
+        // Act
+        var result = await redisCache.Read(key);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(value, result.Value.Value);
+        Assert.Equal(ttl, result.Value.ExpiresIn);
+    }
+    
+    [Fact]
+    public async Task Read_ShouldReturnNull_WhenKeyDoesNotExist()
+    {
+        // Arrange
+        var key = "nonExistentKey";
+
+        var redisConnectionMock = A.Fake<IConnectionMultiplexer>();
+        var databaseMock = A.Fake<IDatabase>();
+
+        A.CallTo(() => databaseMock.StringGetAsync(key, CommandFlags.None))
+            .Returns(RedisValue.Null);
+        A.CallTo(() => databaseMock.KeyTimeToLiveAsync(key, CommandFlags.None))
+            .Returns((TimeSpan?)null);
+
+        A.CallTo(() => redisConnectionMock.GetDatabase(A<int>._, A<object>._))
+            .Returns(databaseMock);
+
+        var redisCache = new RedisCache(redisConnectionMock);
+
+        // Act
+        var result = await redisCache.Read(key);
+
+        // Assert
+        Assert.Null(result?.Value);
+        Assert.Equal(TimeSpan.Zero, result?.ExpiresIn);
+    }
+    
+    [Fact]
+    public async Task Delete_ShouldCallKeyDeleteAsync_WhenDeletingKey()
+    {
+        // Arrange
+        var key = "testKey";
+
+        var redisConnectionMock = A.Fake<IConnectionMultiplexer>();
+        var databaseMock = A.Fake<IDatabase>();
+
+        A.CallTo(() => redisConnectionMock.GetDatabase(A<int>._, A<object>._))
+            .Returns(databaseMock);
+
+        var redisCache = new RedisCache(redisConnectionMock);
+
+        // Act
+        await redisCache.Delete(key);
+
+        // Assert
+        A.CallTo(() => databaseMock.KeyDeleteAsync(key, CommandFlags.None))
+            .MustHaveHappenedOnceExactly();
+    }
+    
+    [Fact]
+    public async Task Write_ShouldCallStringSetAsync_WhenWritingToCache()
+    {
+        // Arrange
+        var key = "testKey";
+        var value = "testValue";
+        var ttl = TimeSpan.FromMinutes(10);
+
+        var redisConnectionMock = A.Fake<IConnectionMultiplexer>();
+        var databaseMock = A.Fake<IDatabase>();
+
+        A.CallTo(() => redisConnectionMock.GetDatabase(A<int>._, A<object>._))
+            .Returns(databaseMock);
+
+        var redisCache = new RedisCache(redisConnectionMock);
+
+        // Act
+        await redisCache.Write(key, value, false, ttl);
+
+        // Assert
+        A.CallTo(() => databaseMock.StringSetAsync(key, value, ttl, false, When.Always, CommandFlags.None))
+            .MustHaveHappenedOnceExactly();
+    }
+    
+    [Fact]
+    public async Task Write_ShouldPreserveTtlIfKeyIsExpiring()
+    {
+        // Arrange
+        var key = "expiringKey";
+        var value = "testValue";
+        var existingTtl = TimeSpan.FromMinutes(5);
+
+        var redisConnectionMock = A.Fake<IConnectionMultiplexer>();
+        var databaseMock = A.Fake<IDatabase>();
+
+        A.CallTo(() => databaseMock.KeyTimeToLiveAsync(key, CommandFlags.None))
+            .Returns(existingTtl);
+
+        A.CallTo(() => redisConnectionMock.GetDatabase(A<int>._, A<object>._))
+            .Returns(databaseMock);
+
+        var redisCache = new RedisCache(redisConnectionMock);
+
+        // Act
+        await redisCache.Write(key, value, true);
+
+        // Assert
+        A.CallTo(() => databaseMock.StringSetAsync(key, value, existingTtl,false, When.Always, CommandFlags.None))
+            .MustHaveHappenedOnceExactly();
+    }
+}

@@ -1,0 +1,211 @@
+using FakeItEasy;
+using StackExchange.Redis;
+using UMS.Features;
+using Xunit;
+
+namespace UMS.Integration.Spec.Steps;
+
+[Binding]
+public sealed class RedisCacheSteps
+{
+    private readonly ScenarioContext _scenarioContext;
+    private IConnectionMultiplexer _redisConnectionMock;
+    private IDatabase _databaseMock;
+    private RedisCache _redisCache;
+    private string _key;
+    private string? _value;
+    private bool _resultHit;
+    private bool _preserveTtl;
+    private TimeSpan? _expectedTtl;
+    
+    public RedisCacheSteps(ScenarioContext scenarioContext)
+    {
+        _scenarioContext = scenarioContext;
+    }
+    
+    [Given(@"a Redis cache")]
+    public void GivenARedisCache()
+    {
+        _redisConnectionMock = A.Fake<IConnectionMultiplexer>();
+        _databaseMock = A.Fake<IDatabase>();
+
+        A.CallTo(() => _redisConnectionMock.GetDatabase(A<int>._, A<object>._))
+            .Returns(_databaseMock);
+
+        _redisCache = new RedisCache(_redisConnectionMock);
+    }
+    
+    [Given(@"a Redis cache with a key ""(.*)"" and a time-to-live of (.*) minutes")]
+    public void GivenARedisCacheWithAKeyAndATimeToLiveOfMinutes(string redisKey, double ttlMinutes)
+    {
+        _key = redisKey;
+        _expectedTtl = TimeSpan.FromMinutes(ttlMinutes);
+
+        _redisConnectionMock = A.Fake<IConnectionMultiplexer>();
+        _databaseMock = A.Fake<IDatabase>();
+
+        A.CallTo(() => _redisConnectionMock.GetDatabase(A<int>._, A<object>._))
+            .Returns(_databaseMock);
+
+        A.CallTo(() => _databaseMock.KeyTimeToLiveAsync(_key, CommandFlags.None))
+            .Returns(_expectedTtl);
+
+        _redisCache = new RedisCache(_redisConnectionMock);
+
+        _scenarioContext.Set(_redisCache, "redisCache");
+    }
+    
+    [Given(@"a Redis cache without the key ""(.*)""")]
+    public void GivenARedisCacheWithoutTheKey(string redisKey)
+    {
+        _key = redisKey;
+
+        _redisConnectionMock = A.Fake<IConnectionMultiplexer>();
+        _databaseMock = A.Fake<IDatabase>();
+
+        A.CallTo(() => _redisConnectionMock.GetDatabase(A<int>._, A<object>._))
+            .Returns(_databaseMock);
+
+        A.CallTo(() => _databaseMock.KeyTimeToLiveAsync(this._key, CommandFlags.None))
+            .Returns((TimeSpan?)null);
+
+        _redisCache = new RedisCache(_redisConnectionMock);
+
+        _scenarioContext.Set(_redisCache, "redisCache");
+    }
+    
+    [Given(@"a Redis cache with a key ""(.*)"", a value ""(.*)"", and a time-to-live of (.*) minutes")]
+    public void GivenARedisCacheWithAKeyAValueAndATimeToLiveOfMinutes(string testKey, string testValue, double ttlMinutes)
+    {
+        _key = testKey;
+        _value = testValue;
+        _expectedTtl = TimeSpan.FromMinutes(ttlMinutes);
+
+        _redisConnectionMock = A.Fake<IConnectionMultiplexer>();
+        _databaseMock = A.Fake<IDatabase>();
+
+        A.CallTo(() => _redisConnectionMock.GetDatabase(A<int>._, A<object>._))
+            .Returns(_databaseMock);
+
+        A.CallTo(() => _databaseMock.StringGetAsync(_key, CommandFlags.None))
+            .Returns(_value);
+        
+        A.CallTo(() => _databaseMock.KeyTimeToLiveAsync(_key, CommandFlags.None))
+            .Returns(_expectedTtl);
+
+        _redisCache = new RedisCache(_redisConnectionMock);
+    }
+    
+    [Given(@"a Redis cache with an expiring key ""(.*)"" and an existing TTL of (.*) minutes")]
+    public void GivenARedisCacheWithAnExpiringKeyAndAnExistingTtlOfMinutes(string redisKey, double existingTtlMinutes)
+    {
+        _key = redisKey;
+        _expectedTtl = TimeSpan.FromMinutes(existingTtlMinutes);
+
+        _redisConnectionMock = A.Fake<IConnectionMultiplexer>();
+        _databaseMock = A.Fake<IDatabase>();
+
+        A.CallTo(() => _databaseMock.KeyTimeToLiveAsync(redisKey, CommandFlags.None))
+            .Returns(_expectedTtl);
+
+        A.CallTo(() => _redisConnectionMock.GetDatabase(A<int>._, A<object>._))
+            .Returns(_databaseMock);
+
+        _redisCache = new RedisCache(_redisConnectionMock);
+    }
+    
+    [When(@"I check the existence of the key ""(.*)""")]
+    public async void WhenICheckTheExistenceOfTheKey(string redisKey)
+    {
+        var redisCache = _scenarioContext.Get<RedisCache>("redisCache");
+        var result = await redisCache.Exists(redisKey);
+        _resultHit = result.Hit;
+        _expectedTtl = result.ExpiresIn;
+    }
+    
+    [When(@"I read the key ""(.*)""")]
+    public async void WhenIReadTheKey(string testKey)
+    {
+        var result = await _redisCache.Read(testKey);
+        _value = result?.Value;
+        _expectedTtl = result?.ExpiresIn;
+    }
+    
+    [When(@"I delete the key ""(.*)""")]
+    public async void WhenIDeleteTheKey(string redisKey)
+    {
+        await _redisCache.Delete(redisKey);
+        _key = redisKey;
+    }
+    
+    [When(@"I write the value ""(.*)"" to the key ""(.*)"" with a TTL of (.*) minutes")]
+    public async void WhenIWriteTheValueToTheKeyWithATtlOfMinutes(string redisValue, string redisKey, double ttlMinutes)
+    {
+        _value = redisValue;
+        _key = redisKey;
+        _expectedTtl = TimeSpan.FromMinutes(ttlMinutes);
+        _preserveTtl = false;
+
+        await _redisCache.Write(redisKey, _value, _preserveTtl, _expectedTtl);
+    }
+    
+    [When(@"I write the value ""(.*)"" to the key ""(.*)"" while preserving the TTL")]
+    public async void WhenIWriteTheValueToTheKeyWhilePreservingTheTtl(string redisValue, string redisKey)
+    {
+        _value = redisValue;
+        _key = redisKey;
+        _preserveTtl = true;
+
+        await _redisCache.Write(redisKey, redisValue, _preserveTtl);
+    }
+    
+    [Then(@"the result should indicate that the key exists and provide the time-to-live of (.*) minutes")]
+    public void ThenTheResultShouldIndicateThatTheKeyExistsAndProvideTheTimeToLiveOfMinutes(double ttlMinutes)
+    {
+        Assert.True(_resultHit);
+        Assert.Equal(_expectedTtl, TimeSpan.FromMinutes(ttlMinutes));
+    }
+    
+    [Then(@"the result should indicate that the key does not exist and the time-to-live should be null")]
+    public void ThenTheResultShouldIndicateThatTheKeyDoesNotExistAndTheTimeToLiveShouldBeNull()
+    {
+        Assert.False(_resultHit);
+        Assert.Null(_expectedTtl);
+    }
+
+    [Then(@"the result should indicate a valid value ""(.*)"" and an expiration time of (.*) minutes")]
+    public void ThenTheResultShouldIndicateAValidValueAndAnExpirationTimeOfMinutes(string expectedValue, double expectedTtlMinutes)
+    {
+        Assert.NotNull(_value);
+        Assert.Equal(expectedValue, _value);
+        Assert.Equal(TimeSpan.FromMinutes(expectedTtlMinutes), _expectedTtl);
+    }
+
+    [Then(@"the result should be null and the expiration time should be zero")]
+    public void ThenTheResultShouldBeNullAndTheExpirationTimeShouldBeZero()
+    {
+        Assert.Null(_value);
+        Assert.Equal(TimeSpan.Zero, _expectedTtl);
+    }
+    
+    [Then(@"the key ""(.*)"" should be deleted from the cache")]
+    public void ThenTheKeyShouldBeDeletedFromTheCache(string redisKey)
+    {
+        A.CallTo(() => _databaseMock.KeyDeleteAsync(redisKey, CommandFlags.None))
+            .MustHaveHappenedOnceExactly();
+    }
+    
+    [Then(@"the value ""(.*)"" should be written to the key ""(.*)"" in the cache with the specified TTL")]
+    public void ThenTheValueShouldBeWrittenToTheKeyInTheCacheWithTheSpecifiedTtl(string expectedValue, string expectedKey)
+    {
+        A.CallTo(() => _databaseMock.StringSetAsync(expectedKey, expectedValue, _expectedTtl, false, When.Always, CommandFlags.None))
+            .MustHaveHappenedOnceExactly();
+    }
+    
+    [Then(@"the value ""(.*)"" should be written to the key ""(.*)"" in the cache with the preserved TTL")]
+    public void ThenTheValueShouldBeWrittenToTheKeyInTheCacheWithThePreservedTtl(string expectedValue, string expectedKey)
+    {
+        A.CallTo(() => _databaseMock.StringSetAsync(expectedKey, expectedValue, _expectedTtl, false, When.Always, CommandFlags.None))
+            .MustHaveHappenedOnceExactly();
+    }
+}
